@@ -24,7 +24,7 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-	Cmdr = {
+	LeftCmdr = {
 		left_box,
 		{
 			eprologix_cmdr,
@@ -36,5 +36,17 @@ init([]) ->
 		worker,
 		[eprologix_cmdr]
 	},
-    {ok, { {one_for_one, 5, 10}, [Cmdr]} }.
+	RightCmdr = {
+		right_box,
+		{
+			eprologix_cmdr,
+			start_link,
+			[{10,0,0,3},1234,right_box]
+		},
+		permanent,
+		5000,
+		worker,
+		[eprologix_cmdr]
+	},
+    {ok, { {one_for_one, 5, 10}, [LeftCmdr,RightCmdr]} }.
 
