@@ -1,0 +1,12 @@
+{application, eprologix,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { eprologix_app, []}},
+  {env, []}
+ ]}.
