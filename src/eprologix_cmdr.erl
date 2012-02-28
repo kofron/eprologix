@@ -1,12 +1,12 @@
 -module(eprologix_cmdr).
 -behavior(gen_fsm).
 
--record(state,{ip_addr, port, c_sock, c_req}).
--record(request,{type,from,data,tag}).
+-record(state,{ip_addr, port, c_sock, c_req, req_q}).
+-record(request,{type,from,data,tag,result}).
 
 %% API
 -export([start_link/0]).
--export([configuring/2,waiting/2,waiting/3,sending/2,receiving/2,parse_reply/2,finishing/2]).
+-export([configuring/2,waiting/2,waiting/3,sending/2,receiving/2,send_reply/2,finishing/2]).
 -export([send_query/1, send_command/1]).
 
 %% gen_fsm callbacks
@@ -17,22 +17,26 @@
 %%% API %%%
 %%%%%%%%%%%
 send_query(QueryString) ->
+	T = make_ref(),
 	Req = #request{
 		type = q,
 		from = self(), 
 		data = QueryString, 
-		tag = make_ref()
+		tag = T
 	},
-	gen_fsm:send_all_state_event(?MODULE,Req).
+	gen_fsm:send_all_state_event(?MODULE,Req),
+	{ok,T}.
 
 send_command(CommandString) ->
+	T = make_ref(),
 	Req = #request{
 		type = c,
 		from = self(),
 		data = CommandString,
-		tag = make_ref()
+		tag = T
 	},
-	gen_fsm:send_all_state_event(?MODULE,Req).
+	gen_fsm:send_all_state_event(?MODULE,Req),
+	{ok,T}.
 
 %%%%%%%%%%%%%%%
 %%% GEN_FSM %%%
@@ -45,7 +49,7 @@ start_link(IPAddr,PortNumber) ->
 init([IPAddr,Port]) ->
 	case get_telnet_sock(IPAddr,Port) of
 		{ok, _} ->
-			St = #state{ip_addr = IPAddr, port = Port},
+			St = #state{ip_addr = IPAddr, port = Port, req_q = queue:new()},
 			{ok, configuring, St, 0};
 		{error, _}=E ->
 			E
@@ -55,16 +59,21 @@ handle_event(Ev, waiting, #state{ip_addr = A, port = P} = StateData)
 		when is_record(Ev, request) ->
 	{ok, Socket} = get_telnet_sock(A,P),
 	NewState = StateData#state{c_sock = Socket, c_req = Ev},
-	{next_state, sending, NewState, 0}.
+	{next_state, sending, NewState, 0};
+handle_event(Ev, AnyState, #state{req_q=Q} = StateData) 
+		when is_record(Ev, request) ->
+	NewQ = push_ev(Ev,Q),
+	NewState = StateData#state{req_q = NewQ},
+	{next_state, AnyState, NewState}.
 
 handle_sync_event(Event, _From, StateName, StateData) ->
 	io:format("<~p>~n",Event),
 	{reply, got_query, StateName, StateData}.
 
-handle_info({tcp,S,Data}=R, receiving, #state{c_sock=S}=StateData) ->
+handle_info({tcp,S,_Data}=R, receiving, #state{c_sock=S}=StateData) ->
 	gen_fsm:send_event(?MODULE,R),
 	{next_state, receiving, StateData};
-handle_info({tcp_closed,S}, StateName, #state{c_sock=S}=StateData) ->
+handle_info({tcp_closed,S}, _StateName, #state{c_sock=S}=StateData) ->
 	{stop, socket_abort, StateData};
 handle_info({tcp_closed,_}, StateName, StateData) ->
 	{next_state, StateName, StateData}.
@@ -91,6 +100,7 @@ waiting(_Event,_From,StateData) ->
 	{reply, ok, waiting, StateData}.
 
 sending(timeout, #state{c_req=R,c_sock=S}=StateData) ->
+	io:format("sending: ~p~n",[R]),
 	ToSend = case is_newline_terminated(R#request.data) of
 		true ->
 			R#request.data;
@@ -106,21 +116,37 @@ sending(timeout, #state{c_req=R,c_sock=S}=StateData) ->
 	gen_tcp:send(S,ToSend),
 	{next_state, NextState, StateData,0}.
 
-receiving({tcp,S,Data}, #state{c_sock=S}=StateData) ->
-	io:format("got reply:~p~n",[Data]),
-	{next_state, parse_reply, StateData, 0};
+receiving({tcp,S,Data}, #state{c_sock=S,c_req=R}=StateData) ->
+	NewRequest = R#request{result=Data},
+	NewStateData = StateData#state{c_req = NewRequest},
+	{next_state, send_reply, NewStateData, 0};
+receiving(no_response, #state{c_req=R}=StateData) ->
+	NewReq = R#request{result={error, no_response}},
+	NewStateData = StateData#state{c_req = NewReq},
+	{next_state, send_reply, NewStateData, 0};	
 receiving(timeout, #state{c_sock=S}=StateData) ->
 	gen_tcp:send(S,"++read eoi\n"),
+	gen_fsm:send_event_after(1000,no_response),
 	{next_state, receiving, StateData}.
 
-parse_reply(timeout, StateData) ->
+send_reply(timeout, #state{c_req=#request{from=F,result=R,tag=T}}=StateData) ->
+	gen_fsm:reply({F,T},R),
 	{next_state, finishing, StateData, 0}.
 
-finishing(timeout, #state{c_sock=S}=StateData) ->
-	close_telnet_sock(S),
-	io:format("completed loop.  waiting again...~n"),
-	NewStateData = StateData#state{c_sock = none, c_req = none},
-	{next_state, waiting, NewStateData}.
+finishing(timeout, #state{c_sock=S,req_q=Q}=StateData) ->
+	{NewStateData, NextState, Timeout} = case next_request(Q) of
+			empty ->
+				close_telnet_sock(S),
+				NData = StateData#state{c_sock = none, c_req = none},
+				NState = waiting,
+				{NData,NState, infinity};
+			{next, Ev, NewQ} ->
+				NData = StateData#state{c_req = Ev, req_q = NewQ},
+				NState = sending,
+				{NData,NState, 0}
+	end,
+
+	{next_state, NextState, NewStateData, Timeout}.
 
 %%%%%%%%%%%%%%%%
 %%% INTERNAL %%%
@@ -156,3 +182,13 @@ should_wait_for_reply(#request{type = c}) ->
 	false;
 should_wait_for_reply(#request{type = q}) ->
 	true.
+
+push_ev(Event,Queue) ->
+	queue:in(Event,Queue).
+next_request(Queue) ->
+	case queue:out(Queue) of
+		{{value, Event}, NewQ} ->
+			{next, Event, NewQ};
+		{empty, _OldQ} ->
+			empty
+	end.
