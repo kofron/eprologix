@@ -42,12 +42,12 @@ send_command(FSMId, CommandString) ->
 %%% GEN_FSM %%%
 %%%%%%%%%%%%%%%
 start_link(IPAddr,PortNumber,FSMId) ->
-	gen_fsm:start_link({local,FSMId},?MODULE,[IPAddr,PortNumber],[]).
+	gen_fsm:start_link({local,FSMId},?MODULE,[IPAddr,PortNumber,FSMId],[]).
 
-init([IPAddr,Port]) ->
+init([IPAddr,Port,FSMId]) ->
 	case get_telnet_sock(IPAddr,Port) of
 		{ok, _} ->
-			St = #state{ip_addr = IPAddr, port = Port, req_q = queue:new()},
+			St = #state{id = FSMId, ip_addr = IPAddr, port = Port, req_q = queue:new()},
 			{ok, configuring, St, 0};
 		{error, _}=E ->
 			E
@@ -67,8 +67,8 @@ handle_event(Ev, AnyState, #state{req_q=Q} = StateData)
 handle_sync_event(Event, _From, _StateName, StateData) ->
 	{stop, unhandled_sync_event, StateData}.
 
-handle_info({tcp,S,_Data}=R, receiving, #state{c_sock=S}=StateData) ->
-	gen_fsm:send_event(?MODULE,R),
+handle_info({tcp,S,_Data}=R, receiving, #state{id=Id, c_sock=S}=StateData) ->
+	gen_fsm:send_event(Id,R),
 	{next_state, receiving, StateData};
 handle_info({tcp_closed,S}, _StateName, #state{c_sock=S}=StateData) ->
 	{stop, socket_abort, StateData};
