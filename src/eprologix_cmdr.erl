@@ -66,9 +66,8 @@ handle_event(Ev, AnyState, #state{req_q=Q} = StateData)
 	NewState = StateData#state{req_q = NewQ},
 	{next_state, AnyState, NewState}.
 
-handle_sync_event(Event, _From, StateName, StateData) ->
-	io:format("<~p>~n",Event),
-	{reply, got_query, StateName, StateData}.
+handle_sync_event(Event, _From, _StateName, StateData) ->
+	{stop, unhandled_sync_event, StateData}.
 
 handle_info({tcp,S,_Data}=R, receiving, #state{c_sock=S}=StateData) ->
 	gen_fsm:send_event(?MODULE,R),
@@ -100,7 +99,6 @@ waiting(_Event,_From,StateData) ->
 	{reply, ok, waiting, StateData}.
 
 sending(timeout, #state{c_req=R,c_sock=S}=StateData) ->
-	io:format("sending: ~p~n",[R]),
 	ToSend = case is_newline_terminated(R#request.data) of
 		true ->
 			R#request.data;
