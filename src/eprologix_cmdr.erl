@@ -1,13 +1,13 @@
 -module(eprologix_cmdr).
 -behavior(gen_fsm).
 
--record(state,{ip_addr, port, c_sock, c_req, req_q}).
+-record(state,{id, ip_addr, port, c_sock, c_req, req_q}).
 -record(request,{type,from,data,tag,result}).
 
 %% API
 -export([start_link/0]).
 -export([configuring/2,waiting/2,waiting/3,sending/2,receiving/2,send_reply/2,finishing/2]).
--export([send_query/1, send_command/1]).
+-export([send_query/2, send_command/2]).
 
 %% gen_fsm callbacks
 -export([init/1, handle_event/3, handle_sync_event/4, handle_info/3, 
@@ -16,7 +16,7 @@
 %%%%%%%%%%%
 %%% API %%%
 %%%%%%%%%%%
-send_query(QueryString) ->
+send_query(FSMId, QueryString) ->
 	T = make_ref(),
 	Req = #request{
 		type = q,
@@ -24,10 +24,10 @@ send_query(QueryString) ->
 		data = QueryString, 
 		tag = T
 	},
-	gen_fsm:send_all_state_event(?MODULE,Req),
+	gen_fsm:send_all_state_event(FSMId,Req),
 	{ok,T}.
 
-send_command(CommandString) ->
+send_command(FSMId, CommandString) ->
 	T = make_ref(),
 	Req = #request{
 		type = c,
@@ -35,7 +35,7 @@ send_command(CommandString) ->
 		data = CommandString,
 		tag = T
 	},
-	gen_fsm:send_all_state_event(?MODULE,Req),
+	gen_fsm:send_all_state_event(FSMId,Req),
 	{ok,T}.
 
 %%%%%%%%%%%%%%%
