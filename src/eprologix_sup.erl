@@ -24,6 +24,17 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-	Cmdr = ?CHILD(eprologix_cmdr,worker),
+	Cmdr = {
+		left_box,
+		{
+			eprologix_cmdr,
+			start_link,
+			[{10,0,0,4},1234,left_box]
+		},
+		permanent,
+		5000,
+		worker,
+		[eprologix_cmdr]
+	},
     {ok, { {one_for_one, 5, 10}, [Cmdr]} }.
 
