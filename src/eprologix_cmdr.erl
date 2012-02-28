@@ -64,7 +64,7 @@ handle_event(Ev, AnyState, #state{req_q=Q} = StateData)
 	NewState = StateData#state{req_q = NewQ},
 	{next_state, AnyState, NewState}.
 
-handle_sync_event(Event, _From, _StateName, StateData) ->
+handle_sync_event(_Event, _From, _StateName, StateData) ->
 	{stop, unhandled_sync_event, StateData}.
 
 handle_info({tcp,S,_Data}=R, receiving, #state{id=Id, c_sock=S}=StateData) ->
