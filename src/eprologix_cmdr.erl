@@ -5,7 +5,7 @@
 -record(request,{type,from,data,tag,result}).
 
 %% API
--export([start_link/0]).
+-export([start_link/3]).
 -export([configuring/2,waiting/2,waiting/3,sending/2,receiving/2,send_reply/2,finishing/2]).
 -export([send_query/2, send_command/2]).
 
@@ -41,10 +41,8 @@ send_command(FSMId, CommandString) ->
 %%%%%%%%%%%%%%%
 %%% GEN_FSM %%%
 %%%%%%%%%%%%%%%
-start_link() ->
-	start_link({10,0,0,4},1234).
-start_link(IPAddr,PortNumber) ->
-	gen_fsm:start_link({local,?MODULE},?MODULE,[IPAddr,PortNumber],[]).
+start_link(IPAddr,PortNumber,FSMId) ->
+	gen_fsm:start_link({local,FSMId},?MODULE,[IPAddr,PortNumber],[]).
 
 init([IPAddr,Port]) ->
 	case get_telnet_sock(IPAddr,Port) of
