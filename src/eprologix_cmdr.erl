@@ -2,12 +2,13 @@
 -behavior(gen_fsm).
 
 -record(state,{id, ip_addr, port, c_sock, c_req, req_q}).
--record(request,{type,from,data,tag,result}).
+-record(request,{type,addr,from,data,tag,result}).
 
 %% API
 -export([start_link/3]).
--export([configuring/2,waiting/2,waiting/3,sending/2,receiving/2,send_reply/2,finishing/2]).
--export([send_query/2, send_command/2]).
+-export([configuring/2,waiting/2,waiting/3,sending/2,set_address/2,
+		receiving/2,send_reply/2,finishing/2]).
+-export([send_query/3, send_command/3]).
 
 %% gen_fsm callbacks
 -export([init/1, handle_event/3, handle_sync_event/4, handle_info/3, 
@@ -16,10 +17,11 @@
 %%%%%%%%%%%
 %%% API %%%
 %%%%%%%%%%%
-send_query(FSMId, QueryString) ->
+send_query(FSMId, GPIBAddr, QueryString) ->
 	T = make_ref(),
 	Req = #request{
 		type = q,
+		addr = GPIBAddr,
 		from = self(), 
 		data = QueryString, 
 		tag = T
@@ -27,10 +29,11 @@ send_query(FSMId, QueryString) ->
 	gen_fsm:send_all_state_event(FSMId,Req),
 	{ok,T}.
 
-send_command(FSMId, CommandString) ->
+send_command(FSMId, GPIBAddr, CommandString) ->
 	T = make_ref(),
 	Req = #request{
 		type = c,
+		addr = GPIBAddr,
 		from = self(),
 		data = CommandString,
 		tag = T
@@ -57,7 +60,7 @@ handle_event(Ev, waiting, #state{ip_addr = A, port = P} = StateData)
 		when is_record(Ev, request) ->
 	{ok, Socket} = get_telnet_sock(A,P),
 	NewState = StateData#state{c_sock = Socket, c_req = Ev},
-	{next_state, sending, NewState, 0};
+	{next_state, set_address, NewState, 0};
 handle_event(Ev, AnyState, #state{req_q=Q} = StateData) 
 		when is_record(Ev, request) ->
 	NewQ = push_ev(Ev,Q),
@@ -95,6 +98,13 @@ waiting(_Event,StateData) ->
 	{next_state, waiting, StateData}.
 waiting(_Event,_From,StateData) ->
 	{reply, ok, waiting, StateData}.
+
+set_address(timeout, #state{c_req=R,c_sock=S}=StateData) ->
+	Address = R#request.addr,
+	NStr = lists:flatten(io_lib:format("~p",[Address])),
+	ToSend = "++addr " ++ NStr ++ "\r\n",
+	gen_tcp:send(S,ToSend),
+	{next_state,sending,StateData,0}.
 
 sending(timeout, #state{c_req=R,c_sock=S}=StateData) ->
 	ToSend = case is_newline_terminated(R#request.data) of
@@ -138,7 +148,7 @@ finishing(timeout, #state{c_sock=S,req_q=Q}=StateData) ->
 				{NData,NState, infinity};
 			{next, Ev, NewQ} ->
 				NData = StateData#state{c_req = Ev, req_q = NewQ},
-				NState = sending,
+				NState = set_address,
 				{NData,NState, 0}
 	end,
 
