@@ -111,7 +111,7 @@ sending(timeout, #state{c_req=R,c_sock=S}=StateData) ->
 		true ->
 			R#request.data;
 		false ->
-			[R#request.data|"\n"]
+			[R#request.data|"\r\n"]
 		end,
 	NextState = case should_wait_for_reply(R) of
 		true ->
